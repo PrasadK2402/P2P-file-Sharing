@@ -1,0 +1,29 @@
+{
+  "name": "p2p",
+  "version": "1.0.0",
+  "description": "P2P file sharing",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gajanandomatwar7/P2P-file-Sharing.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/gajanandomatwar7/P2P-file-Sharing/issues"
+  },
+  "homepage": "https://github.com/gajanandomatwar7/P2P-file-Sharing#readme",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1",
+    "peer": "^1.0.2",
+    "peerjs": "^1.5.5"
+  }
+}

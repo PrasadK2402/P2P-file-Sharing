@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P File Pizza - Upload</title>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #f4f4f9; }
+        .container { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        input[type="file"] { margin: 1rem 0; }
+        #status { margin-top: 1rem; color: #555; }
+        #link { margin-top: 1rem; font-weight: bold; color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🍕 P2P File Share</h1>
+        <p>Select a file to start sharing</p>
+        <input type="file" id="fileInput">
+        <div id="status">Initializing...</div>
+        <div id="link"></div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const status = document.getElementById('status');
+        const linkDiv = document.getElementById('link');
+
+        const CHUNK_SIZE = 64 * 1024; // 64KB chunks
+
+        const iceServers = [];
+        if ("<%= stunServer %>") iceServers.push({ urls: "<%= stunServer %>" });
+        if ("<%= turnServer %>") {
+            iceServers.push({
+                urls: "<%= turnServer %>",
+                username: "<%= turnUser %>",
+                credential: "<%= turnPass %>"
+            });
+        }
+
+        const peer = new Peer({
+            host: window.location.hostname,
+            port: window.location.port || (window.location.protocol === 'https:' ? 443 : 80),
+            path: '/peerjs',
+            config: { iceServers }
+        });
+
+        let selectedFile = null;
+
+        peer.on('open', (id) => {
+            status.innerText = 'Ready. Select a file.';
+            console.log('My peer ID is: ' + id);
+        });
+
+        fileInput.addEventListener('change', async (e) => {
+            selectedFile = e.target.files[0];
+            if (!selectedFile) return;
+
+            status.innerText = 'Creating sharing link...';
+            const slug = Math.random().toString(36).substring(2, 10);
+            
+            const res = await fetch('/api/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ peerId: peer.id, slug })
+            });
+
+            if (res.ok) {
+                const shareLink = `${window.location.origin}/download/${slug}`;
+                linkDiv.innerHTML = `Share this link: <a href="${shareLink}" target="_blank">${shareLink}</a>`;
+                status.innerText = 'Waiting for connections...';
+            } else {
+                status.innerText = 'Error creating link.';
+            }
+        });
+
+        peer.on('connection', (conn) => {
+            console.log('Connected to peer: ' + conn.peer);
+            status.innerText = 'Peer connected! Sending file info...';
+
+            conn.on('data', (data) => {
+                if (data.type === 'REQUEST_INFO') {
+                    conn.send({
+                        type: 'INFO',
+                        name: selectedFile.name,
+                        size: selectedFile.size,
+                        fileType: selectedFile.type
+                    });
+                } else if (data.type === 'START_DOWNLOAD') {
+                    sendFile(conn);
+                }
+            });
+        });
+
+        async function sendFile(conn) {
+            const reader = selectedFile.stream().getReader();
+            let offset = 0;
+            status.innerText = 'Uploading...';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    conn.send({ type: 'CHUNK', done: true });
+                    status.innerText = 'Transfer complete!';
+                    break;
+                }
+
+                // WebRTC has limits, so we might need to chunk the 'value' if it's too big
+                // but stream() usually gives reasonable chunks.
+                conn.send({
+                    type: 'CHUNK',
+                    buffer: value,
+                    done: false,
+                    offset: offset
+                });
+                offset += value.byteLength;
+                
+                // Optional: Throttle or wait for ack if connection is slow
+                // For a basic version, we rely on PeerJS reliable mode.
+            }
+        }
+    </script>
+</body>
+</html>

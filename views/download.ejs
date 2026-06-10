@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P File Pizza - Download</title>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #f4f4f9; }
+        .container { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        #status { margin-top: 1rem; color: #555; }
+        #fileInfo { margin-top: 1rem; display: none; }
+        button { padding: 0.5rem 1rem; cursor: pointer; background: #d32f2f; color: white; border: none; border-radius: 4px; }
+        progress { width: 100%; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🍕 P2P File Share</h1>
+        <div id="status">Connecting to uploader...</div>
+        
+        <div id="fileInfo">
+            <p><strong>File:</strong> <span id="fileName"></span></p>
+            <p><strong>Size:</strong> <span id="fileSize"></span></p>
+            <button id="downloadBtn">Download File</button>
+        </div>
+        
+        <progress id="progressBar" value="0" max="100" style="display: none;"></progress>
+    </div>
+
+    <script>
+        const status = document.getElementById('status');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileNameSpan = document.getElementById('fileName');
+        const fileSizeSpan = document.getElementById('fileSize');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const progressBar = document.getElementById('progressBar');
+
+        const uploaderPeerId = "<%= uploaderPeerId %>";
+        const iceServers = [];
+        if ("<%= stunServer %>") iceServers.push({ urls: "<%= stunServer %>" });
+        if ("<%= turnServer %>") {
+            iceServers.push({
+                urls: "<%= turnServer %>",
+                username: "<%= turnUser %>",
+                credential: "<%= turnPass %>"
+            });
+        }
+
+        const peer = new Peer({
+            host: window.location.hostname,
+            port: window.location.port || (window.location.protocol === 'https:' ? 443 : 80),
+            path: '/peerjs',
+            config: { iceServers }
+        });
+
+        let conn = null;
+        let fileMetadata = null;
+
+        peer.on('open', (id) => {
+            console.log('My peer ID is: ' + id);
+            status.innerText = 'Connecting to uploader...';
+            conn = peer.connect(uploaderPeerId, { reliable: true });
+
+            conn.on('open', () => {
+                status.innerText = 'Connected! Requesting file info...';
+                conn.send({ type: 'REQUEST_INFO' });
+            });
+
+            conn.on('data', (data) => {
+                if (data.type === 'INFO') {
+                    fileMetadata = data;
+                    fileNameSpan.innerText = data.name;
+                    fileSizeSpan.innerText = (data.size / (1024 * 1024)).toFixed(2) + ' MB';
+                    fileInfo.style.display = 'block';
+                    status.innerText = 'File ready for download.';
+                } else if (data.type === 'CHUNK') {
+                    handleChunk(data);
+                }
+            });
+
+            conn.on('close', () => {
+                status.innerText = 'Connection closed.';
+            });
+        });
+
+        let receivedSize = 0;
+        let chunks = [];
+
+        downloadBtn.addEventListener('click', () => {
+            status.innerText = 'Downloading...';
+            downloadBtn.style.display = 'none';
+            progressBar.style.display = 'block';
+            conn.send({ type: 'START_DOWNLOAD' });
+        });
+
+        function handleChunk(data) {
+            if (data.done) {
+                status.innerText = 'Download complete! Assembling...';
+                const blob = new Blob(chunks, { type: fileMetadata.fileType });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileMetadata.name;
+                a.click();
+                URL.revokeObjectURL(url);
+                status.innerText = 'File saved.';
+                progressBar.style.display = 'none';
+                return;
+            }
+
+            chunks.push(data.buffer);
+            receivedSize += data.buffer.byteLength;
+            const progress = (receivedSize / fileMetadata.size) * 100;
+            progressBar.value = progress;
+        }
+    </script>
+</body>
+</html>
