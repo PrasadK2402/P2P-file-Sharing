@@ -47,6 +47,7 @@ let fileMetadata = null;
 let receivedSize = 0;
 let isDownloading = false;
 let isPaused = false;
+let isHostPaused = false;
 let reconnectTimeout = null;
 let lastActiveTime = Date.now();
 let heartbeatInterval = null;
@@ -56,7 +57,9 @@ const dbName = 'P2PFileShareDB';
 const storeName = 'file_chunks';
 let db = null;
 
+let currentStatusColor = 'red';
 function setStatusDot(color) {
+    currentStatusColor = color || 'red';
     status.classList.remove('status-green', 'status-yellow', 'status-red');
     if (color) {
         status.classList.add(`status-${color}`);
@@ -247,13 +250,16 @@ async function connectToUploader() {
     try {
         const res = await fetch(`/api/peer/${slug}`);
         if (res.status === 404) {
-            status.innerText = '⚠️ The sharing session has been terminated by the uploader.';
+            status.innerText = '⚠️ The sharing session has been terminated by the uploader. Redirecting to homepage...';
             setStatusDot('red');
             isDownloading = false;
             progressBar.style.display = 'none';
             fileInfo.style.display = 'none';
             stopHeartbeat();
             clearTimeout(reconnectTimeout);
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 3000);
             return;
         }
         if (res.ok) {
@@ -286,6 +292,7 @@ async function connectToUploader() {
                 status.innerText = 'Connected! Requesting file info...';
             }
             conn.send({ type: 'REQUEST_INFO' });
+            setStatusDot('yellow');
         }
     });
 
@@ -348,23 +355,39 @@ async function connectToUploader() {
             } catch (e) {}
             receivedSize = 0;
             progressBar.value = 0;
-            downloadBtn.innerText = 'Download';
-            downloadBtn.style.display = 'inline-flex';
+            fileInfo.style.display = 'none';
+            downloadBtn.style.display = 'none';
             downloadControls.style.display = 'none';
+            fileMetadata = null;
             stopHeartbeat();
+        } else if (data.type === 'NO_FILE_HOSTED') {
+            status.innerText = '⚠️ No file is currently hosted by the sender.';
+            setStatusDot('red');
+            if (streamAnimation) streamAnimation.style.display = 'none';
+            isDownloading = false;
+            progressBar.value = 0;
+            fileInfo.style.display = 'none';
+            downloadBtn.style.display = 'none';
+            downloadControls.style.display = 'none';
+            fileMetadata = null;
         } else if (data.type === 'HOST_PAUSE') {
             status.innerText = 'Upload paused by host.';
             setStatusDot('yellow');
+            isHostPaused = true;
             if (streamAnimation) streamAnimation.style.display = 'none';
         } else if (data.type === 'HOST_RESUME') {
-            status.innerText = 'Downloading...';
+            isHostPaused = false;
             if (isDownloading && !isPaused) {
+                status.innerText = 'Downloading...';
                 setStatusDot('green');
                 if (streamAnimation) streamAnimation.style.display = 'flex';
                 conn.send({ type: 'START_DOWNLOAD', offset: receivedSize });
+            } else {
+                status.innerText = 'Connected! Ready to download.';
+                setStatusDot('yellow');
             }
         } else if (data.type === 'SESSION_TERMINATED') {
-            status.innerText = '⚠️ The sharing session has been terminated by the uploader.';
+            status.innerText = '⚠️ The sharing session has been terminated by the uploader. Redirecting to homepage...';
             setStatusDot('red');
             if (streamAnimation) streamAnimation.style.display = 'none';
             isDownloading = false;
@@ -373,6 +396,9 @@ async function connectToUploader() {
             stopHeartbeat();
             clearTimeout(reconnectTimeout);
             if (conn) conn.close();
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 3000);
         }
     });
 
@@ -403,6 +429,11 @@ function handleDisconnect() {
 }
 
 downloadBtn.addEventListener('click', () => {
+    if (isHostPaused) {
+        status.innerText = '⚠️ Transfer is paused by the sender. Please wait.';
+        setStatusDot('yellow');
+        return;
+    }
     status.innerText = 'Downloading...';
     setStatusDot('green');
     if (streamAnimation) streamAnimation.style.display = 'flex';
@@ -442,8 +473,13 @@ cancelBtn.addEventListener('click', async () => {
     isDownloading = false;
     isPaused = false;
     stopHeartbeat();
-    status.innerText = 'Download cancelled. Ready to download.';
-    setStatusDot('red');
+    if (fileMetadata) {
+        status.innerText = 'Download cancelled. Ready to download.';
+        setStatusDot('red');
+    } else {
+        status.innerText = '⚠️ No file is currently hosted by the sender.';
+        setStatusDot('red');
+    }
     if (streamAnimation) streamAnimation.style.display = 'none';
     
     try {
@@ -454,7 +490,12 @@ cancelBtn.addEventListener('click', async () => {
     progressBar.value = 0;
     
     downloadBtn.innerText = 'Download';
-    downloadBtn.style.display = 'inline-flex';
+    if (fileMetadata) {
+        downloadBtn.style.display = 'inline-flex';
+    } else {
+        downloadBtn.style.display = 'none';
+        fileInfo.style.display = 'none';
+    }
     downloadControls.style.display = 'none';
     pausePlayBtn.innerText = 'Pause Download';
     pausePlayBtn.classList.remove('paused');
@@ -507,3 +548,88 @@ async function handleChunk(data) {
         progressBar.value = receivedSize; // Update progress bar natively
     }
 }
+
+function initInteractiveGrid() {
+    const canvas = document.getElementById('bgCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const spacing = 24;
+    let mouse = { x: -1000, y: -1000 };
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    window.addEventListener('mousemove', (e) => {
+        mouse.x = e.clientX;
+        mouse.y = e.clientY;
+    });
+
+    window.addEventListener('mouseleave', () => {
+        mouse.x = -1000;
+        mouse.y = -1000;
+    });
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const isLight = document.body.classList.contains('light-theme');
+        
+        // Define theme dot color based on connection state
+        let dotRGB = '239, 68, 68'; // default red
+        if (currentStatusColor === 'green') {
+            dotRGB = '16, 185, 129';
+        } else if (currentStatusColor === 'yellow') {
+            dotRGB = '245, 158, 11';
+        }
+        
+        const time = Date.now() * 0.002;
+        const breathe = Math.sin(time);
+        
+        for (let x = spacing / 2; x < canvas.width; x += spacing) {
+            for (let y = spacing / 2; y < canvas.height; y += spacing) {
+                const dx = x - mouse.x;
+                const dy = y - mouse.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const maxDist = 100 + breathe * 15;
+                
+                let drawX = x;
+                let drawY = y;
+                
+                ctx.beginPath();
+                if (dist < maxDist) {
+                    const factor = 1 - (dist / maxDist);
+                    
+                    // Bounce/Magnetic effect: push dots away from the cursor
+                    const pushForce = factor * 10 * (1 + breathe * 0.25);
+                    drawX += (dx / (dist || 1)) * pushForce;
+                    drawY += (dy / (dist || 1)) * pushForce;
+                    
+                    const size = 1 + factor * (2.2 + breathe * 0.6);
+                    ctx.arc(drawX, drawY, size, 0, Math.PI * 2);
+                    
+                    ctx.fillStyle = isLight 
+                        ? `rgba(${dotRGB}, ${0.08 + factor * (0.5 + breathe * 0.05)})`
+                        : `rgba(${dotRGB}, ${0.12 + factor * (0.75 + breathe * 0.08)})`;
+                    
+                    if (factor > 0.6) {
+                        ctx.fillStyle = `rgba(${dotRGB}, ${factor * (0.85 + breathe * 0.15)})`;
+                    }
+                } else {
+                    const ambientBreathe = Math.sin(time + (x + y) * 0.015);
+                    ctx.arc(drawX, drawY, 1 + ambientBreathe * 0.2, 0, Math.PI * 2);
+                    ctx.fillStyle = isLight
+                        ? `rgba(${dotRGB}, ${0.05 + ambientBreathe * 0.01})`
+                        : `rgba(${dotRGB}, ${0.09 + ambientBreathe * 0.02})`;
+                }
+                ctx.fill();
+            }
+        }
+        requestAnimationFrame(draw);
+    }
+    draw();
+}
+initInteractiveGrid();

@@ -30,6 +30,10 @@ body.light-theme {
     --bg-subtle-hover: rgba(0, 0, 0, 0.04);
 }
 
+body.light-theme .container {
+    box-shadow: none;
+}
+
 body {
     font-family: var(--font-mono);
     display: flex;
@@ -42,8 +46,6 @@ body {
     padding: clamp(1rem, 4vw, 2.5rem);
     box-sizing: border-box;
     background-color: var(--bg-color);
-    background-image: radial-gradient(var(--dot-color) 1px, transparent 1px);
-    background-size: 24px 24px;
     color: var(--text-main);
     overflow-x: hidden;
     letter-spacing: -0.02em;
@@ -143,7 +145,6 @@ h1.status-yellow::after {
     font-size: 0.8rem;
     color: var(--text-muted);
     word-break: break-all;
-    text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 
@@ -166,7 +167,6 @@ h1.status-yellow::after {
     gap: 0.5rem;
     width: 100%;
     margin-top: 1rem;
-    text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 
@@ -208,7 +208,6 @@ h1.status-yellow::after {
     color: var(--text-muted);
     margin-top: 1.2rem;
     line-height: 1.5;
-    text-transform: uppercase;
     letter-spacing: 0.05em;
     display: flex;
     align-items: center;
