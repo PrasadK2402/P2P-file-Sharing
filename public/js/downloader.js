@@ -1,16 +1,4 @@
-// Theme Toggle Support
-const themeToggleBtn = document.getElementById('themeToggleBtn');
-if (themeToggleBtn) {
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'light' || (!savedTheme && window.matchMedia('(prefers-color-scheme: light)').matches)) {
-        document.body.classList.add('light-theme');
-    }
-    themeToggleBtn.addEventListener('click', () => {
-        document.body.classList.toggle('light-theme');
-        const isLight = document.body.classList.contains('light-theme');
-        localStorage.setItem('theme', isLight ? 'light' : 'dark');
-    });
-}
+// Theme Toggle and Canvas Grid initialization is handled in common.js
 
 const status = document.getElementById('status');
 const fileInfo = document.getElementById('fileInfo');
@@ -25,22 +13,6 @@ const progressBar = document.getElementById('progressBar');
 
 const slug = window.config.slug;
 let uploaderPeerId = window.config.uploaderPeerId;
-const iceServers = [];
-if (window.config.stunServer) iceServers.push({ urls: window.config.stunServer });
-if (window.config.turnServer) {
-    iceServers.push({
-        urls: window.config.turnServer,
-        username: window.config.turnUser,
-        credential: window.config.turnPass
-    });
-}
-
-const peer = new Peer({
-    host: window.location.hostname,
-    port: window.location.port || (window.location.protocol === 'https:' ? 443 : 80),
-    path: '/peerjs',
-    config: { iceServers }
-});
 
 let conn = null;
 let fileMetadata = null;
@@ -52,14 +24,11 @@ let reconnectTimeout = null;
 let lastActiveTime = Date.now();
 let heartbeatInterval = null;
 let pendingWrites = [];
-
-const dbName = 'P2PFileShareDB';
-const storeName = 'file_chunks';
-let db = null;
-
 let currentStatusColor = 'red';
+window.currentStatusColor = currentStatusColor;
 function setStatusDot(color) {
     currentStatusColor = color || 'red';
+    window.currentStatusColor = currentStatusColor;
     status.classList.remove('status-green', 'status-yellow', 'status-red');
     if (color) {
         status.classList.add(`status-${color}`);
@@ -71,104 +40,6 @@ function setStatusDot(color) {
             h1.classList.add(`status-${color}`);
         }
     }
-}
-
-function initDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(dbName, 1);
-        request.onupgradeneeded = (e) => {
-            const database = e.target.result;
-            if (!database.objectStoreNames.contains(storeName)) {
-                const store = database.createObjectStore(storeName, { keyPath: 'slug_offset' });
-                store.createIndex('slug', 'slug', { unique: false });
-            }
-        };
-        request.onsuccess = (e) => {
-            db = e.target.result;
-            resolve(db);
-        };
-        request.onerror = (e) => reject(e.target.error);
-    });
-}
-
-function storeChunk(slug, offset, buffer) {
-    return new Promise((resolve, reject) => {
-        if (!db) return reject(new Error("DB not initialized"));
-        const transaction = db.transaction([storeName], 'readwrite');
-        const store = transaction.objectStore(storeName);
-        const request = store.put({
-            slug_offset: `${slug}:${offset}`,
-            slug: slug,
-            offset: offset,
-            data: buffer
-        });
-        request.onsuccess = () => resolve();
-        request.onerror = (e) => reject(e.target.error);
-    });
-}
-
-function getStoredProgress(slug) {
-    return new Promise((resolve, reject) => {
-        if (!db) return reject(new Error("DB not initialized"));
-        const transaction = db.transaction([storeName], 'readonly');
-        const store = transaction.objectStore(storeName);
-        const index = store.index('slug');
-        const request = index.getAll(slug);
-        request.onsuccess = (e) => {
-            const records = e.target.result;
-            records.sort((a, b) => a.offset - b.offset);
-            resolve(records);
-        };
-        request.onerror = (e) => reject(e.target.error);
-    });
-}
-
-function storeMetadata(slug, meta) {
-    return new Promise((resolve, reject) => {
-        if (!db) return reject(new Error("DB not initialized"));
-        const transaction = db.transaction([storeName], 'readwrite');
-        const store = transaction.objectStore(storeName);
-        const request = store.put({
-            slug_offset: `metadata:${slug}`,
-            slug: slug,
-            meta: meta
-        });
-        request.onsuccess = () => resolve();
-        request.onerror = (e) => reject(e.target.error);
-    });
-}
-
-function getStoredMetadata(slug) {
-    return new Promise((resolve, reject) => {
-        if (!db) return reject(new Error("DB not initialized"));
-        const transaction = db.transaction([storeName], 'readonly');
-        const store = transaction.objectStore(storeName);
-        const request = store.get(`metadata:${slug}`);
-        request.onsuccess = (e) => {
-            resolve(e.target.result ? e.target.result.meta : null);
-        };
-        request.onerror = (e) => reject(e.target.error);
-    });
-}
-
-function clearStoredChunks(slug) {
-    return new Promise((resolve, reject) => {
-        if (!db) return resolve();
-        const transaction = db.transaction([storeName], 'readwrite');
-        const store = transaction.objectStore(storeName);
-        const index = store.index('slug');
-        const request = index.openCursor(slug);
-        request.onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (cursor) {
-                store.delete(cursor.primaryKey);
-                cursor.continue();
-            } else {
-                resolve();
-            }
-        };
-        request.onerror = (e) => reject(e.target.error);
-    });
 }
 
 peer.on('disconnected', () => {
@@ -428,208 +299,27 @@ function handleDisconnect() {
     }, 3000);
 }
 
-downloadBtn.addEventListener('click', () => {
-    if (isHostPaused) {
-        status.innerText = '⚠️ Transfer is paused by the sender. Please wait.';
-        setStatusDot('yellow');
-        return;
-    }
-    status.innerText = 'Downloading...';
-    setStatusDot('green');
-    if (streamAnimation) streamAnimation.style.display = 'flex';
-    downloadBtn.style.display = 'none';
-    downloadControls.style.display = 'flex';
-    progressBar.style.display = 'block';
-    isDownloading = true;
-    startHeartbeat();
-    conn.send({ type: 'START_DOWNLOAD', offset: receivedSize });
-});
+window.downloaderState = {
+    get isDownloading() { return isDownloading; },
+    set isDownloading(v) { isDownloading = v; },
+    get isPaused() { return isPaused; },
+    set isPaused(v) { isPaused = v; },
+    get isHostPaused() { return isHostPaused; },
+    set isHostPaused(v) { isHostPaused = v; },
+    get receivedSize() { return receivedSize; },
+    set receivedSize(v) { receivedSize = v; },
+    get fileMetadata() { return fileMetadata; },
+    set fileMetadata(v) { fileMetadata = v; },
+    get conn() { return conn; },
+    set conn(v) { conn = v; },
+    get slug() { return slug; },
+    get pendingWrites() { return pendingWrites; },
+    set pendingWrites(v) { pendingWrites = v; },
+    startHeartbeat,
+    stopHeartbeat,
+    clearStoredChunks
+};
 
-pausePlayBtn.addEventListener('click', () => {
-    isPaused = !isPaused;
-    if (isPaused) {
-        pausePlayBtn.innerText = 'Resume Download';
-        pausePlayBtn.classList.add('paused');
-        status.innerText = 'Download paused.';
-        setStatusDot('yellow');
-        if (streamAnimation) streamAnimation.style.display = 'none';
-        conn.send({ type: 'PAUSE_TRANSFER' });
-        stopHeartbeat();
-    } else {
-        pausePlayBtn.innerText = 'Pause Download';
-        pausePlayBtn.classList.remove('paused');
-        status.innerText = 'Downloading...';
-        setStatusDot('green');
-        if (streamAnimation) streamAnimation.style.display = 'flex';
-        startHeartbeat();
-        conn.send({ type: 'START_DOWNLOAD', offset: receivedSize });
-    }
-});
 
-cancelBtn.addEventListener('click', async () => {
-    if (conn && conn.open) {
-        conn.send({ type: 'CANCEL_TRANSFER' });
-    }
-    isDownloading = false;
-    isPaused = false;
-    stopHeartbeat();
-    if (fileMetadata) {
-        status.innerText = 'Download cancelled. Ready to download.';
-        setStatusDot('red');
-    } else {
-        status.innerText = '⚠️ No file is currently hosted by the sender.';
-        setStatusDot('red');
-    }
-    if (streamAnimation) streamAnimation.style.display = 'none';
-    
-    try {
-        await clearStoredChunks(slug);
-    } catch (e) {}
-    
-    receivedSize = 0;
-    progressBar.value = 0;
-    
-    downloadBtn.innerText = 'Download';
-    if (fileMetadata) {
-        downloadBtn.style.display = 'inline-flex';
-    } else {
-        downloadBtn.style.display = 'none';
-        fileInfo.style.display = 'none';
-    }
-    downloadControls.style.display = 'none';
-    pausePlayBtn.innerText = 'Pause Download';
-    pausePlayBtn.classList.remove('paused');
-});
 
-async function handleChunk(data) {
-    if (data.done) {
-        status.innerText = 'Download complete! Assembling...';
-        stopHeartbeat();
-        try {
-            // Wait for all background database writes to finish before assembling
-            await Promise.all(pendingWrites);
-            pendingWrites = [];
-
-            const records = await getStoredProgress(slug);
-            const blob = new Blob(records.map(r => r.data), { type: fileMetadata.fileType });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileMetadata.name;
-            a.click();
-            URL.revokeObjectURL(url);
-            status.innerText = 'File saved.';
-            setStatusDot('red');
-            await clearStoredChunks(slug);
-        } catch (err) {
-            console.error("Assembly or cleanup failed:", err);
-            status.innerText = 'File assembly failed.';
-            setStatusDot('red');
-        }
-        progressBar.style.display = 'none';
-        downloadControls.style.display = 'none';
-        if (streamAnimation) streamAnimation.style.display = 'none';
-        isDownloading = false;
-        return;
-    }
-
-    if (data.offset === receivedSize) {
-        const chunkLength = data.buffer.byteLength !== undefined ? data.buffer.byteLength : (data.buffer.length || 0);
-        // Start the DB write in the background without blocking the incoming chunks flow
-        const writePromise = storeChunk(slug, data.offset, data.buffer).catch(err => {
-            console.error("Failed to cache chunk:", err);
-            throw err;
-        });
-        pendingWrites.push(writePromise);
-
-        // Update receivedSize synchronously so the next incoming chunk (which arrives immediately)
-        // matches the updated offset check
-        receivedSize += chunkLength;
-        progressBar.value = receivedSize; // Update progress bar natively
-    }
-}
-
-function initInteractiveGrid() {
-    const canvas = document.getElementById('bgCanvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const spacing = 24;
-    let mouse = { x: -1000, y: -1000 };
-
-    function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-    }
-    window.addEventListener('resize', resize);
-    resize();
-
-    window.addEventListener('mousemove', (e) => {
-        mouse.x = e.clientX;
-        mouse.y = e.clientY;
-    });
-
-    window.addEventListener('mouseleave', () => {
-        mouse.x = -1000;
-        mouse.y = -1000;
-    });
-
-    function draw() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        const isLight = document.body.classList.contains('light-theme');
-        
-        // Define theme dot color based on connection state
-        let dotRGB = '239, 68, 68'; // default red
-        if (currentStatusColor === 'green') {
-            dotRGB = '16, 185, 129';
-        } else if (currentStatusColor === 'yellow') {
-            dotRGB = '245, 158, 11';
-        }
-        
-        const time = Date.now() * 0.002;
-        const breathe = Math.sin(time);
-        
-        for (let x = spacing / 2; x < canvas.width; x += spacing) {
-            for (let y = spacing / 2; y < canvas.height; y += spacing) {
-                const dx = x - mouse.x;
-                const dy = y - mouse.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                const maxDist = 100 + breathe * 15;
-                
-                let drawX = x;
-                let drawY = y;
-                
-                ctx.beginPath();
-                if (dist < maxDist) {
-                    const factor = 1 - (dist / maxDist);
-                    
-                    // Bounce/Magnetic effect: push dots away from the cursor
-                    const pushForce = factor * 10 * (1 + breathe * 0.25);
-                    drawX += (dx / (dist || 1)) * pushForce;
-                    drawY += (dy / (dist || 1)) * pushForce;
-                    
-                    const size = 1 + factor * (2.2 + breathe * 0.6);
-                    ctx.arc(drawX, drawY, size, 0, Math.PI * 2);
-                    
-                    ctx.fillStyle = isLight 
-                        ? `rgba(${dotRGB}, ${0.08 + factor * (0.5 + breathe * 0.05)})`
-                        : `rgba(${dotRGB}, ${0.12 + factor * (0.75 + breathe * 0.08)})`;
-                    
-                    if (factor > 0.6) {
-                        ctx.fillStyle = `rgba(${dotRGB}, ${factor * (0.85 + breathe * 0.15)})`;
-                    }
-                } else {
-                    const ambientBreathe = Math.sin(time + (x + y) * 0.015);
-                    ctx.arc(drawX, drawY, 1 + ambientBreathe * 0.2, 0, Math.PI * 2);
-                    ctx.fillStyle = isLight
-                        ? `rgba(${dotRGB}, ${0.05 + ambientBreathe * 0.01})`
-                        : `rgba(${dotRGB}, ${0.09 + ambientBreathe * 0.02})`;
-                }
-                ctx.fill();
-            }
-        }
-        requestAnimationFrame(draw);
-    }
-    draw();
-}
-initInteractiveGrid();
+// Interactive grid canvas initialization is handled in common.js

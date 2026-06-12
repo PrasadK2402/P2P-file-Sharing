@@ -136,6 +136,8 @@ p {
     margin-bottom: 2rem;
     line-height: 1.6;
     letter-spacing: 0.05em;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .btn {
@@ -236,6 +238,8 @@ p {
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 /* Default to Red */
@@ -325,6 +329,8 @@ p {
     font-size: 0.8rem;
     text-transform: none;
     letter-spacing: 0;
+    word-break: break-all;
+    overflow-wrap: break-word;
 }
 
 #link a {

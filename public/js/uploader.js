@@ -1,16 +1,4 @@
-// Theme Toggle Support
-const themeToggleBtn = document.getElementById('themeToggleBtn');
-if (themeToggleBtn) {
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'light' || (!savedTheme && window.matchMedia('(prefers-color-scheme: light)').matches)) {
-        document.body.classList.add('light-theme');
-    }
-    themeToggleBtn.addEventListener('click', () => {
-        document.body.classList.toggle('light-theme');
-        const isLight = document.body.classList.contains('light-theme');
-        localStorage.setItem('theme', isLight ? 'light' : 'dark');
-    });
-}
+// Theme Toggle and Canvas Grid initialization is handled in common.js
 
 const fileInput = document.getElementById('fileInput');
 const uploadWrapper = document.getElementById('uploadWrapper');
@@ -34,8 +22,10 @@ let activeSlug = null;
 let activeConnections = new Set();
 
 let currentStatusColor = 'red';
+window.currentStatusColor = currentStatusColor;
 function setStatusDot(color) {
     currentStatusColor = color || 'red';
+    window.currentStatusColor = currentStatusColor;
     status.classList.remove('status-green', 'status-yellow', 'status-red');
     if (color) {
         status.classList.add(`status-${color}`);
@@ -49,27 +39,7 @@ function setStatusDot(color) {
     }
 }
 
-const iceServers = [];
-if (window.config && window.config.stunServer) iceServers.push({ urls: window.config.stunServer });
-if (window.config && window.config.turnServer) {
-    iceServers.push({
-        urls: window.config.turnServer,
-        username: window.config.turnUser,
-        credential: window.config.turnPass
-    });
-}
 
-const peer = new Peer({
-    host: window.location.hostname,
-    port: window.location.port || (window.location.protocol === 'https:' ? 443 : 80),
-    path: '/peerjs',
-    config: { iceServers }
-});
-
-peer.on('disconnected', () => {
-    console.log('Disconnected from signaling server. Reconnecting...');
-    peer.reconnect();
-});
 
 peer.on('open', (id) => {
     status.innerText = 'Ready. Select a file.';
@@ -99,124 +69,19 @@ function checkRestoreSession() {
     }
 }
 
-discardBtn.addEventListener('click', () => {
-    localStorage.removeItem('active_share');
-    activeSlug = null;
-    restoreBanner.style.display = 'none';
-    instructionText.style.display = 'block';
-    instructionText.innerHTML = 'Select a file to start sharing. Senders must keep this tab open to allow peers to fetch files.';
-    fileInput.value = '';
-    fileInput.disabled = false;
-    status.innerText = 'Ready. Select a file.';
-    setStatusDot('red');
-    linkContainer.style.display = 'none';
-    linkDiv.innerHTML = '';
-    controlPanel.style.display = 'none';
-    uploadWrapper.style.display = 'block';
-});
+window.uploaderState = {
+    get selectedFile() { return selectedFile; },
+    set selectedFile(v) { selectedFile = v; },
+    get isPaused() { return isPaused; },
+    set isPaused(v) { isPaused = v; },
+    get activeSlug() { return activeSlug; },
+    set activeSlug(v) { activeSlug = v; },
+    get activeConnections() { return activeConnections; },
+    get peer() { return peer; },
+    sendFile,
+    checkRestoreSession
+};
 
-copyBtn.addEventListener('click', () => {
-    if (!activeSlug) return;
-    const shareLink = `${window.location.origin}/download/${activeSlug}`;
-    navigator.clipboard.writeText(shareLink).then(() => {
-        copyBtn.innerHTML = `
-            <svg style="width: 20px; height: 20px; color: #10b981;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-            </svg>
-        `;
-        setTimeout(() => {
-            copyBtn.innerHTML = `
-                <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
-                </svg>
-            `;
-        }, 2000);
-    });
-});
-
-resetBtn.addEventListener('click', async () => {
-    activeConnections.forEach(conn => {
-        try {
-            conn.send({ type: 'SESSION_TERMINATED' });
-        } catch (e) {}
-        conn.close();
-    });
-    activeConnections.clear();
-
-    if (activeSlug) {
-        try {
-            await fetch('/api/delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ slug: activeSlug })
-            });
-        } catch (e) {
-            console.error("Failed to delete room slug:", e);
-        }
-    }
-
-    localStorage.removeItem('active_share');
-    activeSlug = null;
-    selectedFile = null;
-    isPaused = false;
-
-    fileInput.value = '';
-    fileInput.disabled = false;
-    status.innerText = 'Ready. Select a file.';
-    setStatusDot('red');
-    linkContainer.style.display = 'none';
-    linkDiv.innerHTML = '';
-    controlPanel.style.display = 'none';
-    restoreBanner.style.display = 'none';
-    instructionText.style.display = 'block';
-    instructionText.innerHTML = 'Select a file to start sharing. Senders must keep this tab open to allow peers to fetch files.';
-    uploadWrapper.style.display = 'block';
-});
-
-fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    fileInput.disabled = true;
-    selectedFile = file;
-
-    status.innerText = 'Registering link...';
-    
-    const slug = activeSlug || Math.random().toString(36).substring(2, 10);
-    
-    const res = await fetch('/api/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ peerId: peer.id, slug })
-    });
-
-    if (res.ok) {
-        activeSlug = slug;
-        localStorage.setItem('active_share', JSON.stringify({ slug, name: selectedFile.name }));
-        const shareLink = `${window.location.origin}/download/${slug}`;
-        linkContainer.style.display = 'flex';
-        linkDiv.innerHTML = `Share link: <a href="${shareLink}" target="_blank">${shareLink}</a>`;
-        status.innerText = 'Link activated. Waiting for connections...';
-        restoreBanner.style.display = 'none';
-        instructionText.style.display = 'block';
-        instructionText.innerHTML = `Currently hosting: <strong>${selectedFile.name}</strong>`;
-        controlPanel.style.display = 'block';
-        uploadWrapper.style.display = 'none';
-
-        activeConnections.forEach(conn => {
-            conn.send({
-                type: 'INFO',
-                name: selectedFile.name,
-                size: selectedFile.size,
-                fileType: selectedFile.type
-            });
-        });
-    } else {
-        status.innerText = 'Error registering link.';
-        setStatusDot('red');
-        fileInput.disabled = false;
-        selectedFile = null;
-    }
-});
 
 peer.on('connection', (conn) => {
     console.log('Connected to peer: ' + conn.peer);
@@ -278,207 +143,8 @@ peer.on('connection', (conn) => {
     });
 });
 
-pausePlayBtn.addEventListener('click', () => {
-    isPaused = !isPaused;
-    if (isPaused) {
-        pausePlayBtn.innerText = 'Resume Upload';
-        pausePlayBtn.classList.add('paused');
-        status.innerText = 'Upload paused.';
-        setStatusDot('yellow');
-        if (streamAnimation) streamAnimation.style.display = 'none';
-        activeConnections.forEach(conn => {
-            conn.send({ type: 'HOST_PAUSE' });
-        });
-    } else {
-        pausePlayBtn.innerText = 'Pause Upload';
-        pausePlayBtn.classList.remove('paused');
-        status.innerText = `Connected peers: ${activeConnections.size}`;
-        setStatusDot('green');
-        if (streamAnimation && activeConnections.size > 0 && selectedFile) streamAnimation.style.display = 'flex';
-        activeConnections.forEach(conn => {
-            conn.send({ type: 'HOST_RESUME' });
-        });
-    }
-});
+// Event listeners extracted to uploaderEvents.js
 
-cancelTransferBtn.addEventListener('click', () => {
-    // Cancel any active stream send reader on all connections
-    activeConnections.forEach(conn => {
-        conn.isTransferPaused = true;
-        try {
-            conn.send({ type: 'TRANSFER_CANCELLED' });
-        } catch (e) {}
-    });
 
-    selectedFile = null;
-    isPaused = false;
-    fileInput.value = '';
-    fileInput.disabled = false;
-    
-    // Update uploader UI
-    status.innerText = 'Transfer cancelled. Select a file to share.';
-    setStatusDot('red');
-    if (streamAnimation) streamAnimation.style.display = 'none';
-    instructionText.innerHTML = 'Select a file to start sharing. Senders must keep this tab open to allow peers to fetch files.';
-    controlPanel.style.display = 'none';
-    uploadWrapper.style.display = 'block';
-    pausePlayBtn.innerText = 'Pause Upload';
-    pausePlayBtn.classList.remove('paused');
 
-    // Keep session slug in localStorage, but clear file name info
-    if (activeSlug) {
-        localStorage.setItem('active_share', JSON.stringify({ slug: activeSlug, name: '' }));
-    }
-});
-
-async function sendFile(conn, startOffset = 0) {
-    try {
-        conn.isTransferPaused = false;
-        setStatusDot('green');
-        if (streamAnimation) streamAnimation.style.display = 'flex';
-        const fileSlice = selectedFile.slice(startOffset);
-        const reader = fileSlice.stream().getReader();
-        let offset = startOffset;
-
-        while (true) {
-            if (isPaused || conn.isTransferPaused) {
-                setStatusDot('yellow');
-                if (streamAnimation) streamAnimation.style.display = 'none';
-                reader.cancel();
-                break;
-            }
-
-            const { done, value } = await reader.read();
-            if (done) {
-                conn.send({ type: 'CHUNK', done: true });
-                status.innerText = 'Transfer complete!';
-                setStatusDot('red');
-                if (streamAnimation) streamAnimation.style.display = 'none';
-                break;
-            }
-
-            // Segment chunk into safe 64KB slices for WebRTC Data Channel
-            let valueOffset = 0;
-            while (valueOffset < value.length) {
-                if (isPaused || conn.isTransferPaused) {
-                    break;
-                }
-
-                // WebRTC Backpressure: Check if channel queue is saturated
-                if (conn.dataChannel && conn.dataChannel.bufferedAmount > 256 * 1024) {
-                    await new Promise(resolve => {
-                        const dc = conn.dataChannel;
-                        dc.bufferedAmountLowThreshold = 64 * 1024;
-                        const onLow = () => {
-                            dc.removeEventListener('bufferedamountlow', onLow);
-                            resolve();
-                        };
-                        dc.addEventListener('bufferedamountlow', onLow);
-                    });
-                }
-
-                const chunkLength = Math.min(64 * 1024, value.length - valueOffset);
-                const subArray = value.subarray(valueOffset, valueOffset + chunkLength);
-
-                conn.send({
-                    type: 'CHUNK',
-                    buffer: subArray,
-                    done: false,
-                    offset: offset
-                });
-                offset += chunkLength;
-                valueOffset += chunkLength;
-            }
-        }
-    } catch (error) {
-        console.error('Error sending file stream:', error);
-        setStatusDot('red');
-        if (streamAnimation) streamAnimation.style.display = 'none';
-    }
-}
-
-function initInteractiveGrid() {
-    const canvas = document.getElementById('bgCanvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const spacing = 24;
-    let mouse = { x: -1000, y: -1000 };
-
-    function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-    }
-    window.addEventListener('resize', resize);
-    resize();
-
-    window.addEventListener('mousemove', (e) => {
-        mouse.x = e.clientX;
-        mouse.y = e.clientY;
-    });
-
-    window.addEventListener('mouseleave', () => {
-        mouse.x = -1000;
-        mouse.y = -1000;
-    });
-
-    function draw() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        const isLight = document.body.classList.contains('light-theme');
-        
-        // Define theme dot color based on connection state
-        let dotRGB = '239, 68, 68'; // default red
-        if (currentStatusColor === 'green') {
-            dotRGB = '16, 185, 129';
-        } else if (currentStatusColor === 'yellow') {
-            dotRGB = '245, 158, 11';
-        }
-        
-        const time = Date.now() * 0.002;
-        const breathe = Math.sin(time);
-        
-        for (let x = spacing / 2; x < canvas.width; x += spacing) {
-            for (let y = spacing / 2; y < canvas.height; y += spacing) {
-                const dx = x - mouse.x;
-                const dy = y - mouse.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                const maxDist = 100 + breathe * 15;
-                
-                let drawX = x;
-                let drawY = y;
-                
-                ctx.beginPath();
-                if (dist < maxDist) {
-                    const factor = 1 - (dist / maxDist);
-                    
-                    // Bounce/Magnetic effect: push dots away from the cursor
-                    const pushForce = factor * 10 * (1 + breathe * 0.25);
-                    drawX += (dx / (dist || 1)) * pushForce;
-                    drawY += (dy / (dist || 1)) * pushForce;
-                    
-                    const size = 1 + factor * (2.2 + breathe * 0.6);
-                    ctx.arc(drawX, drawY, size, 0, Math.PI * 2);
-                    
-                    ctx.fillStyle = isLight 
-                        ? `rgba(${dotRGB}, ${0.08 + factor * (0.5 + breathe * 0.05)})`
-                        : `rgba(${dotRGB}, ${0.12 + factor * (0.75 + breathe * 0.08)})`;
-                    
-                    if (factor > 0.6) {
-                        ctx.fillStyle = `rgba(${dotRGB}, ${factor * (0.85 + breathe * 0.15)})`;
-                    }
-                } else {
-                    const ambientBreathe = Math.sin(time + (x + y) * 0.015);
-                    ctx.arc(drawX, drawY, 1 + ambientBreathe * 0.2, 0, Math.PI * 2);
-                    ctx.fillStyle = isLight
-                        ? `rgba(${dotRGB}, ${0.05 + ambientBreathe * 0.01})`
-                        : `rgba(${dotRGB}, ${0.09 + ambientBreathe * 0.02})`;
-                }
-                ctx.fill();
-            }
-        }
-        requestAnimationFrame(draw);
-    }
-    draw();
-}
-initInteractiveGrid();
-
+// Interactive grid canvas initialization is handled in common.js

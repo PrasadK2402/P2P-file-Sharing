@@ -213,6 +213,8 @@ h1.status-yellow::after {
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 /* Default to Red */
