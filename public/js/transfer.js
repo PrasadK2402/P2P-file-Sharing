@@ -2,6 +2,7 @@ async function handleChunk(data) {
     const state = window.downloaderState;
     if (!state || !state.isDownloading) return;
     if (data.done) {
+        state.sendProgressUpdate(true);
         status.innerText = 'Download complete! Assembling...';
         state.stopHeartbeat();
         try {
@@ -45,5 +46,6 @@ async function handleChunk(data) {
         // matches the updated offset check
         state.receivedSize += chunkLength;
         progressBar.value = state.receivedSize; // Update progress bar natively
+        state.sendProgressUpdate();
     }
 }

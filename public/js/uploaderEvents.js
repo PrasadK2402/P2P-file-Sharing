@@ -1,19 +1,14 @@
 if (discardBtn) {
     discardBtn.addEventListener('click', () => {
         const state = window.uploaderState;
-        localStorage.removeItem('active_share');
-        state.activeSlug = null;
-        restoreBanner.style.display = 'none';
-        instructionText.style.display = 'block';
-        instructionText.innerHTML = 'Select a file to start sharing. Senders must keep this tab open to allow peers to fetch files.';
-        fileInput.value = '';
-        fileInput.disabled = false;
-        status.innerText = 'Ready. Select a file.';
-        setStatusDot('red');
-        linkContainer.style.display = 'none';
-        linkDiv.innerHTML = '';
-        controlPanel.style.display = 'none';
-        uploadWrapper.style.display = 'block';
+        state.activeConnections.forEach(conn => {
+            try {
+                conn.send({ type: 'SESSION_TERMINATED' });
+            } catch (e) {}
+            conn.close();
+        });
+        state.activeConnections.clear();
+        resetSenderToPicker();
     });
 }
 
@@ -49,7 +44,7 @@ if (resetBtn) {
             conn.close();
         });
         state.activeConnections.clear();
-
+        clearPeerProgress();
         if (state.activeSlug) {
             try {
                 await fetch('/api/delete', {
@@ -62,81 +57,95 @@ if (resetBtn) {
             }
         }
 
-        localStorage.removeItem('active_share');
-        state.activeSlug = null;
-        state.selectedFile = null;
-        state.isPaused = false;
-
-        fileInput.value = '';
-        fileInput.disabled = false;
-        status.innerText = 'Ready. Select a file.';
-        setStatusDot('red');
-        linkContainer.style.display = 'none';
-        linkDiv.innerHTML = '';
-        controlPanel.style.display = 'none';
-        restoreBanner.style.display = 'none';
-        instructionText.style.display = 'block';
-        instructionText.innerHTML = 'Select a file to start sharing. Senders must keep this tab open to allow peers to fetch files.';
-        uploadWrapper.style.display = 'block';
+        resetSenderToPicker();
     });
 }
 
 if (fileInput) {
+    const prepareHostingFromSelection = async () => {
+        const state = window.uploaderState;
+        const files = Array.from(state.selectedFiles || []);
+        if (!files.length || state.activeSlug) return;
+
+        fileInput.disabled = true;
+        status.innerText = files.length > 1 ? 'Preparing zip archive...' : 'Preparing share link...';
+
+        const slug = state.activeSlug || Math.random().toString(36).substring(2, 10);
+        const activationSessionId = state.selectionSessionId;
+
+        try {
+            if (files.length === 1) {
+                state.selectedFile = files[0];
+            } else {
+                const zipFile = await buildZipFile(files, 'files.zip');
+                if (activationSessionId !== state.selectionSessionId) return;
+                state.selectedFile = zipFile;
+            }
+
+            const res = await fetch('/api/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ peerId: state.peer.id, slug })
+            });
+
+            if (activationSessionId !== state.selectionSessionId || !state.selectedFiles.length) {
+                return;
+            }
+
+            if (res.ok) {
+                state.activeSlug = slug;
+                localStorage.setItem('active_share', JSON.stringify({ slug, name: state.selectedFiles.map(file => file.name).join(', ') }));
+                const shareLink = `${window.location.origin}/download/${slug}`;
+                linkContainer.style.display = 'flex';
+                linkDiv.innerHTML = `Share link: <a href="${shareLink}" target="_blank">${shareLink}</a>`;
+                status.innerText = state.isPaused ? 'Share link activated. Sharing is paused.' : 'Link activated. Waiting for connections...';
+                restoreBanner.style.display = 'none';
+                instructionText.style.display = 'block';
+                instructionText.innerHTML = `Currently hosting: <strong>${state.selectedFile ? state.selectedFile.name : 'files.zip'}</strong>`;
+                uploadWrapper.style.display = 'none';
+                resetBtn.style.display = 'block';
+
+                state.activeConnections.forEach(conn => {
+                    conn.send({
+                        type: 'INFO',
+                        name: state.selectedFile.name,
+                        size: state.selectedFile.size,
+                        fileType: state.selectedFile.type
+                    });
+                });
+            } else {
+                status.innerText = 'Error registering link.';
+                setStatusDot('red');
+                resetSenderToPicker();
+            }
+        } catch (err) {
+            console.error('Failed to prepare hosted file:', err);
+            status.innerText = 'Failed to prepare hosted file.';
+            setStatusDot('red');
+            resetSenderToPicker();
+        }
+    };
+
+    window.uploaderState.prepareHostingFromSelection = prepareHostingFromSelection;
+
     fileInput.addEventListener('change', async (e) => {
         const state = window.uploaderState;
-        const file = e.target.files[0];
-        if (!file) return;
-        fileInput.disabled = true;
-        state.selectedFile = file;
-
-        status.innerText = 'Registering link...';
-        
-        const slug = state.activeSlug || Math.random().toString(36).substring(2, 10);
-        
-        const res = await fetch('/api/create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ peerId: state.peer.id, slug })
-        });
-
-        if (res.ok) {
-            state.activeSlug = slug;
-            localStorage.setItem('active_share', JSON.stringify({ slug, name: state.selectedFile.name }));
-            const shareLink = `${window.location.origin}/download/${slug}`;
-            linkContainer.style.display = 'flex';
-            linkDiv.innerHTML = `Share link: <a href="${shareLink}" target="_blank">${shareLink}</a>`;
-            status.innerText = 'Link activated. Waiting for connections...';
-            restoreBanner.style.display = 'none';
-            instructionText.style.display = 'block';
-            instructionText.innerHTML = `Currently hosting: <strong>${state.selectedFile.name}</strong>`;
-            controlPanel.style.display = 'block';
-            uploadWrapper.style.display = 'none';
-
-            state.activeConnections.forEach(conn => {
-                conn.send({
-                    type: 'INFO',
-                    name: state.selectedFile.name,
-                    size: state.selectedFile.size,
-                    fileType: state.selectedFile.type
-                });
-            });
-        } else {
-            status.innerText = 'Error registering link.';
-            setStatusDot('red');
-            fileInput.disabled = false;
-            state.selectedFile = null;
-        }
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+        state.selectedFiles = files;
+        await prepareHostingFromSelection();
     });
 }
 
 if (pausePlayBtn) {
     pausePlayBtn.addEventListener('click', () => {
         const state = window.uploaderState;
+        if (!state.selectedFiles.length && !state.activeSlug) return;
         state.isPaused = !state.isPaused;
         if (state.isPaused) {
             pausePlayBtn.innerText = 'Resume Upload';
             pausePlayBtn.classList.add('paused');
-            status.innerText = 'Upload paused.';
+            status.innerText = state.activeSlug ? 'Upload paused.' : 'Share staged. Transfer paused before start.';
             setStatusDot('yellow');
             if (streamAnimation) streamAnimation.style.display = 'none';
             state.activeConnections.forEach(conn => {
@@ -145,9 +154,9 @@ if (pausePlayBtn) {
         } else {
             pausePlayBtn.innerText = 'Pause Upload';
             pausePlayBtn.classList.remove('paused');
-            status.innerText = `Connected peers: ${state.activeConnections.size}`;
-            setStatusDot('green');
-            if (streamAnimation && state.activeConnections.size > 0 && state.selectedFile) streamAnimation.style.display = 'flex';
+            status.innerText = state.activeConnections.size > 0 ? `Connected peers: ${state.activeConnections.size}` : 'Share resumed. Waiting for connections...';
+            setStatusDot(state.activeConnections.size > 0 ? 'green' : 'yellow');
+            if (streamAnimation && state.activeConnections.size > 0 && state.selectedFiles.length) streamAnimation.style.display = 'flex';
             state.activeConnections.forEach(conn => {
                 conn.send({ type: 'HOST_RESUME' });
             });
@@ -166,24 +175,6 @@ if (cancelTransferBtn) {
             } catch (e) {}
         });
 
-        state.selectedFile = null;
-        state.isPaused = false;
-        fileInput.value = '';
-        fileInput.disabled = false;
-        
-        // Update uploader UI
-        status.innerText = 'Transfer cancelled. Select a file to share.';
-        setStatusDot('red');
-        if (streamAnimation) streamAnimation.style.display = 'none';
-        instructionText.innerHTML = 'Select a file to start sharing. Senders must keep this tab open to allow peers to fetch files.';
-        controlPanel.style.display = 'none';
-        uploadWrapper.style.display = 'block';
-        pausePlayBtn.innerText = 'Pause Upload';
-        pausePlayBtn.classList.remove('paused');
-
-        // Keep session slug in localStorage, but clear file name info
-        if (state.activeSlug) {
-            localStorage.setItem('active_share', JSON.stringify({ slug: state.activeSlug, name: '' }));
-        }
+        resetSenderToPicker();
     });
 }

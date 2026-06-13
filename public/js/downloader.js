@@ -24,6 +24,9 @@ let reconnectTimeout = null;
 let lastActiveTime = Date.now();
 let heartbeatInterval = null;
 let pendingWrites = [];
+let receiverPeerId = null;
+let lastProgressSentAt = 0;
+let lastProgressPercent = -1;
 let currentStatusColor = 'red';
 window.currentStatusColor = currentStatusColor;
 function setStatusDot(color) {
@@ -49,6 +52,7 @@ peer.on('disconnected', () => {
 
 peer.on('open', async (id) => {
     console.log('My peer ID is: ' + id);
+    receiverPeerId = id;
     try {
         await initDB();
         const cachedMeta = await getStoredMetadata(slug);
@@ -111,6 +115,32 @@ function stopHeartbeat() {
     clearInterval(heartbeatInterval);
 }
 
+function sendProgressUpdate(force = false) {
+    if (!conn || !conn.open || !fileMetadata || !fileMetadata.size || !receiverPeerId) return;
+
+    const percent = Math.min(100, Math.round((receivedSize / fileMetadata.size) * 100));
+    const now = Date.now();
+
+    if (!force) {
+        if (percent === lastProgressPercent && now - lastProgressSentAt < 1000) return;
+        if (now - lastProgressSentAt < 350 && percent - lastProgressPercent < 5) return;
+    }
+
+    lastProgressSentAt = now;
+    lastProgressPercent = percent;
+
+    try {
+        conn.send({
+            type: 'PROGRESS_UPDATE',
+            peerId: receiverPeerId,
+            percent,
+            complete: percent >= 100
+        });
+    } catch (err) {
+        console.error('Failed to send progress update:', err);
+    }
+}
+
 async function connectToUploader() {
     if (conn) {
         conn.close();
@@ -156,6 +186,7 @@ async function connectToUploader() {
             if (!isPaused) {
                 conn.send({ type: 'START_DOWNLOAD', offset: receivedSize });
             }
+            sendProgressUpdate(true);
         } else {
             if (receivedSize > 0) {
                 status.innerText = `Connected! Ready to resume download at ${(receivedSize / (1024 * 1024)).toFixed(2)} MB.`;
@@ -315,9 +346,16 @@ window.downloaderState = {
     get slug() { return slug; },
     get pendingWrites() { return pendingWrites; },
     set pendingWrites(v) { pendingWrites = v; },
+    get receiverPeerId() { return receiverPeerId; },
+    set receiverPeerId(v) { receiverPeerId = v; },
+    get lastProgressSentAt() { return lastProgressSentAt; },
+    set lastProgressSentAt(v) { lastProgressSentAt = v; },
+    get lastProgressPercent() { return lastProgressPercent; },
+    set lastProgressPercent(v) { lastProgressPercent = v; },
     startHeartbeat,
     stopHeartbeat,
-    clearStoredChunks
+    clearStoredChunks,
+    sendProgressUpdate
 };
 
 
