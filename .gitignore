@@ -1,3 +1,21 @@
-node_modules
-currentsession.txt
+node_modules/
+
+# Environment and local runtime config
 .env
+.env.*
+!.env.example
+currentsession.txt
+
+# Local assistant/browser tooling artifacts
+.claude/
+.mcp/
+.playwright-mcp/
+.codex/
+playwright-report/
+test-results/
+
+# Generated E2E test artifacts
+e2e-test.js
+test-*.bin
+test-*.txt
+test-downloads/

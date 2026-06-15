@@ -65,7 +65,7 @@ if (cancelBtn) {
         } catch (e) {}
         
         state.receivedSize = 0;
-        progressBar.value = 0;
+        state.updateProgressBar();
         
         downloadBtn.style.display = 'none';
         fileInfo.style.display = 'none';

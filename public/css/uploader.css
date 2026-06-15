@@ -513,4 +513,12 @@ p {
         padding: 2rem 1rem;
         margin: 1rem 0;
     }
+
+    #linkContainer {
+        flex-direction: column;
+    }
+
+    #controlPanel > div {
+        flex-direction: column;
+    }
 }

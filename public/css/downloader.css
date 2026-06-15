@@ -447,4 +447,8 @@ progress::-moz-progress-bar {
         padding: 1rem;
         margin: 1rem 0;
     }
+
+    #downloadControls {
+        flex-direction: column;
+    }
 }

@@ -29,6 +29,24 @@ let lastProgressSentAt = 0;
 let lastProgressPercent = -1;
 let currentStatusColor = 'red';
 window.currentStatusColor = currentStatusColor;
+
+function clampPercent(value) {
+    const percent = Number(value);
+    if (!Number.isFinite(percent)) return 0;
+    return Math.max(0, Math.min(100, percent));
+}
+
+function getDownloadProgressPercent() {
+    if (!fileMetadata || !fileMetadata.size) return 0;
+    return clampPercent((receivedSize / fileMetadata.size) * 100);
+}
+
+function updateProgressBar() {
+    if (!progressBar) return;
+    progressBar.max = 100;
+    progressBar.value = getDownloadProgressPercent();
+}
+
 function setStatusDot(color) {
     currentStatusColor = color || 'red';
     window.currentStatusColor = currentStatusColor;
@@ -118,7 +136,7 @@ function stopHeartbeat() {
 function sendProgressUpdate(force = false) {
     if (!conn || !conn.open || !fileMetadata || !fileMetadata.size || !receiverPeerId) return;
 
-    const percent = Math.min(100, Math.round((receivedSize / fileMetadata.size) * 100));
+    const percent = Math.round(getDownloadProgressPercent());
     const now = Date.now();
 
     if (!force) {
@@ -208,7 +226,7 @@ async function connectToUploader() {
                     console.log("Cached file metadata mismatch. Resetting local cache.");
                     await clearStoredChunks(slug);
                     receivedSize = 0;
-                    progressBar.value = 0;
+                    updateProgressBar();
                     downloadBtn.innerText = 'Download';
                     isDownloading = false;
                     fileChanged = true;
@@ -223,9 +241,7 @@ async function connectToUploader() {
             fileSizeSpan.innerText = (data.size / (1024 * 1024)).toFixed(2) + ' MB';
             fileInfo.style.display = 'block';
             
-            // Configure progress bar limits natively
-            progressBar.max = fileMetadata.size;
-            progressBar.value = receivedSize;
+            updateProgressBar();
             
             // Only reset UI controls if the file actually changed or if we are not actively downloading
             if (fileChanged || !isDownloading) {
@@ -256,7 +272,7 @@ async function connectToUploader() {
                 await clearStoredChunks(slug);
             } catch (e) {}
             receivedSize = 0;
-            progressBar.value = 0;
+            updateProgressBar();
             fileInfo.style.display = 'none';
             downloadBtn.style.display = 'none';
             downloadControls.style.display = 'none';
@@ -267,7 +283,7 @@ async function connectToUploader() {
             setStatusDot('red');
             if (streamAnimation) streamAnimation.style.display = 'none';
             isDownloading = false;
-            progressBar.value = 0;
+            updateProgressBar();
             fileInfo.style.display = 'none';
             downloadBtn.style.display = 'none';
             downloadControls.style.display = 'none';
@@ -355,7 +371,8 @@ window.downloaderState = {
     startHeartbeat,
     stopHeartbeat,
     clearStoredChunks,
-    sendProgressUpdate
+    sendProgressUpdate,
+    updateProgressBar
 };
 
 

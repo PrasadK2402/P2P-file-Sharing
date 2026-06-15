@@ -45,7 +45,7 @@ async function handleChunk(data) {
         // Update receivedSize synchronously so the next incoming chunk (which arrives immediately)
         // matches the updated offset check
         state.receivedSize += chunkLength;
-        progressBar.value = state.receivedSize; // Update progress bar natively
+        state.updateProgressBar();
         state.sendProgressUpdate();
     }
 }

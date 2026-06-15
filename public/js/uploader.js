@@ -184,6 +184,9 @@ function renderSelectedFiles(files) {
         row.style.justifyContent = 'space-between';
         row.style.alignItems = 'center';
         row.style.gap = '0.75rem';
+        row.style.width = '100%';
+        row.style.boxSizing = 'border-box';
+        row.style.minWidth = '0';
         row.style.padding = '0.65rem 0.75rem';
         row.style.border = '1px solid rgba(255, 255, 255, 0.08)';
         row.style.borderRadius = '10px';
@@ -194,7 +197,9 @@ function renderSelectedFiles(files) {
         name.style.fontSize = '0.75rem';
         name.style.color = 'var(--text-main)';
         name.style.letterSpacing = '0.04em';
-        name.style.wordBreak = 'break-word';
+        name.style.overflow = 'hidden';
+        name.style.whiteSpace = 'nowrap';
+        name.style.textOverflow = 'ellipsis';
         name.textContent = `${index + 1}. ${file.name}`;
 
         const size = document.createElement('div');
@@ -223,7 +228,10 @@ function renderSelectedFiles(files) {
         const meta = document.createElement('div');
         meta.style.display = 'flex';
         meta.style.alignItems = 'center';
+        meta.style.justifyContent = 'flex-end';
         meta.style.gap = '0.6rem';
+        meta.style.flexShrink = '0';
+        meta.style.minWidth = 'fit-content';
         meta.appendChild(size);
         meta.appendChild(removeBtn);
 
