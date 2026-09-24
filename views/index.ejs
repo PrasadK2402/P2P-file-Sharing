@@ -6,6 +6,7 @@
     <title>File Share - Send</title>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.4.4/build/qrcode.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/uploader.css?v=<%= Date.now() %>">
 </head>
@@ -49,6 +50,13 @@
             <div id="selectedFilesList" style="display: flex; flex-direction: column; gap: 0.55rem;"></div>
         </div>
 
+        <div id="shareOptionsPanel" style="display: none; margin-top: 0.75rem; padding: 0.9rem; background: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: 12px; text-align: left;">
+            <label for="sharePassword" style="display: block; font-size: 0.75rem; color: var(--text-main); letter-spacing: 0.04em; margin-bottom: 0.5rem;">Share options</label>
+            <input type="password" id="sharePassword" autocomplete="new-password" placeholder="Password (optional)" style="width: 100%; box-sizing: border-box; padding: 0.55rem 0.7rem; font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--text-main); background: transparent; border: 1px solid var(--border-subtle); border-radius: 8px; outline: none;">
+            <div style="font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.04em; margin-top: 0.4rem;">Optional — leave blank for no password</div>
+            <button id="generateLinkBtn" class="btn btn-primary" style="width: 100%; margin-top: 0.75rem;">Generate Link</button>
+        </div>
+
         <div id="status">Initializing WebRTC...</div>
         
         <div id="streamAnimation" class="stream-animation" style="display: none;">
@@ -67,6 +75,8 @@
                 </svg>
             </button>
         </div>
+
+        <div id="qrCodeContainer" style="display: none; margin-top: 0.75rem; padding: 0.9rem; background: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: 12px; text-align: center;"></div>
 
         <div id="controlPanel" style="display: none;">
             <div style="display: flex; gap: 0.5rem; justify-content: center; width: 100%;">

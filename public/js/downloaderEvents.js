@@ -1,3 +1,29 @@
+if (verifyPasswordBtn) {
+    verifyPasswordBtn.addEventListener('click', () => {
+        const state = window.downloaderState;
+        const conn = state.conn;
+        if (!conn || !conn.open) {
+            status.innerText = 'Not connected to uploader. Waiting to reconnect...';
+            setStatusDot('yellow');
+            return;
+        }
+        // Verify entirely over the DataConnection — the password never
+        // touches any server.
+        conn.send({
+            type: 'VERIFY_PASSWORD',
+            password: passwordInput ? passwordInput.value : ''
+        });
+    });
+}
+
+if (passwordInput) {
+    passwordInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && verifyPasswordBtn) {
+            verifyPasswordBtn.click();
+        }
+    });
+}
+
 if (downloadBtn) {
     downloadBtn.addEventListener('click', () => {
         const state = window.downloaderState;
@@ -70,6 +96,8 @@ if (cancelBtn) {
         downloadBtn.style.display = 'none';
         fileInfo.style.display = 'none';
         downloadControls.style.display = 'none';
+        state.resetPasswordVerification();
+        state.showPasswordPromptUI(false);
         pausePlayBtn.innerText = 'Pause Download';
         pausePlayBtn.classList.remove('paused');
     });

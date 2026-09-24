@@ -39,6 +39,11 @@
         <div id="fileInfo">
             <p><strong>File:</strong> <span id="fileName"></span></p>
             <p><strong>Size:</strong> <span id="fileSize"></span></p>
+            <div id="passwordPrompt" style="display: none; margin-top: 1rem;">
+                <input type="password" id="passwordInput" autocomplete="off" placeholder="Password required" style="width: 100%; box-sizing: border-box; padding: 0.55rem 0.7rem; font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--text-main); background: transparent; border: 1px solid var(--border-subtle); border-radius: 8px; outline: none;">
+                <button id="verifyPasswordBtn" class="btn btn-primary">Unlock</button>
+                <div id="passwordError" style="display: none; font-size: 0.7rem; color: var(--accent-red); letter-spacing: 0.04em; margin-top: 0.4rem;">Incorrect password. Try again.</div>
+            </div>
             <button id="downloadBtn" class="btn btn-primary">Download File</button>
             <div id="downloadControls" style="display: none; gap: 0.5rem; width: 100%; margin-top: 1rem;">
                 <button id="pausePlayBtn" class="btn btn-pause" style="flex: 1; margin: 0;">Pause Download</button>
