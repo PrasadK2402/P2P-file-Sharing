@@ -16,7 +16,7 @@ A premium, client-to-client peer-to-peer (P2P) file sharing application built wi
 - **Auto-Redirection**: Receivers are automatically redirected back to the homepage after 3 seconds if the uploader resets or terminates the session.
 - **Responsive Layout**: Clean responsive layout tailored for Android, iOS, iPad, MacBook, and standard laptops.
 
----
+--- 
 
 ## Tech Stack
 
