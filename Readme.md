@@ -259,7 +259,3 @@ Full results are in [`testSummary.md`](./testSummary.md).
 ## 📄 License
 
 Released under the [MIT License](./LICENSE).
-
-## 👤 Author
-
-**Prasad** — [@PrasadK2402](https://github.com/PrasadK2402)
