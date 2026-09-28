@@ -61,6 +61,37 @@ if (resetBtn) {
     });
 }
 
+if (generateLinkBtn) {
+    generateLinkBtn.addEventListener('click', async () => {
+        const state = window.uploaderState;
+        // Nothing staged yet — nothing to host.
+        if (!state.selectedFiles.length) return;
+        // Guard against double-clicks and re-generating over an active link.
+        if (state.activeSlug || state.isGeneratingLink) return;
+
+        // Store the password in memory only (on uploaderState), never persisted.
+        state.sharePassword = sharePasswordInput ? sharePasswordInput.value : '';
+        // Password changed => previously verified receivers are no longer valid.
+        state.activeConnections.forEach(conn => {
+            try {
+                conn.send({ type: 'SESSION_TERMINATED' });
+            } catch (e) {}
+            conn.close();
+        });
+        state.activeConnections.clear();
+
+        state.isGeneratingLink = true;
+        generateLinkBtn.disabled = true;
+        try {
+            // FEATURE 3, step 2: only now zip (if needed) + /api/create + link/QR.
+            await state.prepareHostingFromSelection();
+        } finally {
+            state.isGeneratingLink = false;
+            generateLinkBtn.disabled = false;
+        }
+    });
+}
+
 if (fileInput) {
     const prepareHostingFromSelection = async () => {
         const state = window.uploaderState;
@@ -98,6 +129,37 @@ if (fileInput) {
                 const shareLink = `${window.location.origin}/download/${slug}`;
                 linkContainer.style.display = 'flex';
                 linkDiv.innerHTML = `Share link: <a href="${shareLink}" target="_blank">${shareLink}</a>`;
+
+                // FEATURE 1: render a QR code encoding the exact shareLink.
+                // Clear any previous QR so a regenerated link replaces it.
+                if (qrCodeContainer) {
+                    qrCodeContainer.innerHTML = '';
+                    if (window.QRCode && typeof window.QRCode.toCanvas === 'function') {
+                        const qrCanvas = document.createElement('canvas');
+                        qrCodeContainer.appendChild(qrCanvas);
+                        QRCode.toCanvas(qrCanvas, shareLink, {
+                            width: 148,
+                            margin: 1,
+                            // White modules on transparent, inverted to black
+                            // via CSS in light theme (see uploader.css).
+                            color: { dark: '#ffffff', light: '#00000000' }
+                        }, (err) => {
+                            if (err) {
+                                console.error('QR generation failed:', err);
+                                qrCodeContainer.innerHTML = '';
+                                qrCodeContainer.style.display = 'none';
+                                return;
+                            }
+                            qrCodeContainer.style.display = 'block';
+                        });
+                    } else {
+                        console.warn('QRCode library not loaded — skipping QR render.');
+                        qrCodeContainer.style.display = 'none';
+                    }
+                }
+
+                // Share options are locked in once the link exists.
+                if (shareOptionsPanel) shareOptionsPanel.style.display = 'none';
                 status.innerText = state.isPaused ? 'Share link activated. Sharing is paused.' : 'Link activated. Waiting for connections...';
                 restoreBanner.style.display = 'none';
                 instructionText.style.display = 'block';
@@ -128,12 +190,13 @@ if (fileInput) {
 
     window.uploaderState.prepareHostingFromSelection = prepareHostingFromSelection;
 
-    fileInput.addEventListener('change', async (e) => {
+    fileInput.addEventListener('change', (e) => {
         const state = window.uploaderState;
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
+        // FEATURE 3, step 1: stage only. No /api/create, no link yet —
+        // hosting starts only when the user clicks "Generate Link".
         state.selectedFiles = files;
-        await prepareHostingFromSelection();
     });
 }
 

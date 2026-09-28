@@ -18,6 +18,10 @@ const peerProgressList = document.getElementById('peerProgressList');
 const selectedFilesPanel = document.getElementById('selectedFilesPanel');
 const selectedFilesSummary = document.getElementById('selectedFilesSummary');
 const selectedFilesList = document.getElementById('selectedFilesList');
+const shareOptionsPanel = document.getElementById('shareOptionsPanel');
+const sharePasswordInput = document.getElementById('sharePassword');
+const generateLinkBtn = document.getElementById('generateLinkBtn');
+const qrCodeContainer = document.getElementById('qrCodeContainer');
 const streamAnimation = document.getElementById('streamAnimation');
 const instructionText = document.getElementById('instructionText');
 
@@ -25,6 +29,13 @@ let selectedFiles = [];
 let selectedFile = null;
 let isPaused = false;
 let activeSlug = null;
+// FEATURE 2/3: the share password is an ephemeral, in-memory-only secret.
+// It lives exclusively in this tab (never in localStorage, never in Redis),
+// and is only ever compared over the existing PeerJS DataConnection.
+let sharePassword = '';
+// Per-connection verification state for password-protected shares.
+// Keyed by conn.peer so a reconnect (new peer id / new conn) re-locks.
+const verifiedConns = new Map();
 let activeConnections = new Set();
 let selectionSessionId = 0;
 let nextPeerProgressLabel = 1;
@@ -162,6 +173,35 @@ function formatFileSize(bytes) {
     return `${size} B`;
 }
 
+function isSharePasswordProtected() {
+    return typeof sharePassword === 'string' && sharePassword.length > 0;
+}
+
+function isConnVerified(peerId) {
+    return verifiedConns.get(peerId) === true;
+}
+
+function markConnVerified(peerId) {
+    verifiedConns.set(peerId, true);
+}
+
+function clearConnVerification() {
+    verifiedConns.clear();
+}
+
+// Password verification is a self-contained message exchange over the
+// DataConnection, so a rate-limit / lockout policy can be slotted in here
+// later (per conn.peer) without refactoring the handler below.
+function handleVerifyPassword(conn, data) {
+    const candidate = typeof data.password === 'string' ? data.password : '';
+    if (candidate === sharePassword) {
+        markConnVerified(conn.peer);
+        conn.send({ type: 'PASSWORD_OK' });
+    } else {
+        conn.send({ type: 'PASSWORD_INVALID' });
+    }
+}
+
 function renderSelectedFiles(files) {
     if (!selectedFilesPanel || !selectedFilesSummary || !selectedFilesList) return;
 
@@ -172,6 +212,7 @@ function renderSelectedFiles(files) {
         selectedFilesSummary.textContent = '';
         if (controlPanel) controlPanel.style.display = 'none';
         if (resetBtn) resetBtn.style.display = 'none';
+        if (shareOptionsPanel) shareOptionsPanel.style.display = 'none';
         return;
     }
 
@@ -241,6 +282,9 @@ function renderSelectedFiles(files) {
     });
 
     selectedFilesPanel.style.display = 'block';
+    // FEATURE 3: reveal the share-options panel (password + "Generate Link")
+    // while files are staged. Once a link exists (activeSlug) it stays hidden.
+    if (shareOptionsPanel) shareOptionsPanel.style.display = activeSlug ? 'none' : 'block';
     if (controlPanel) controlPanel.style.display = 'block';
     if (resetBtn) resetBtn.style.display = 'block';
 }
@@ -259,9 +303,8 @@ function removeStagedFile(index) {
         return;
     }
     setStagedFiles(nextFiles);
-    if (!activeSlug && window.uploaderState && typeof window.uploaderState.prepareHostingFromSelection === 'function') {
-        window.uploaderState.prepareHostingFromSelection();
-    }
+    // Note: no auto-hosting here anymore. With the two-step flow, /api/create
+    // only runs when the user clicks "Generate Link" (uploaderEvents.js).
 }
 
 function resetSenderToPicker(options = {}) {
@@ -270,6 +313,13 @@ function resetSenderToPicker(options = {}) {
     selectedFile = null;
     isPaused = false;
     selectionSessionId += 1;
+
+    // Clear the in-memory password and per-connection verification state.
+    sharePassword = '';
+    clearConnVerification();
+
+    if (sharePasswordInput) sharePasswordInput.value = '';
+    if (shareOptionsPanel) shareOptionsPanel.style.display = 'none';
 
     if (fileInput) {
         fileInput.value = '';
@@ -287,6 +337,10 @@ function resetSenderToPicker(options = {}) {
     if (uploadWrapper) uploadWrapper.style.display = 'block';
     if (linkContainer) linkContainer.style.display = 'none';
     if (linkDiv) linkDiv.innerHTML = '';
+    if (qrCodeContainer) {
+        qrCodeContainer.innerHTML = '';
+        qrCodeContainer.style.display = 'none';
+    }
     if (selectedFilesPanel) selectedFilesPanel.style.display = 'none';
     if (controlPanel) controlPanel.style.display = 'none';
     if (restoreBanner) restoreBanner.style.display = 'none';
@@ -342,6 +396,11 @@ function checkRestoreSession() {
         try {
             const data = JSON.parse(saved);
             activeSlug = data.slug;
+            // NOTE (Feature 3): the share password is never persisted, so a
+            // resumed session comes back WITHOUT a password (no crash, sharing
+            // simply continues unprotected). Receivers already mid-transfer are
+            // unaffected; new download attempts just aren't password-gated
+            // unless the sender re-generates with a password.
             restoreMsg.innerHTML = `⚠️ <strong>Resuming Link</strong><br>You have an active sharing link for <strong>${data.name}</strong>. Please select this file again to resume hosting.`;
             restoreBanner.style.display = 'block';
             instructionText.style.display = 'none';
@@ -356,6 +415,10 @@ window.uploaderState = {
     set selectedFiles(v) { setStagedFiles(v); },
     get selectedFile() { return selectedFile; },
     set selectedFile(v) { selectedFile = v || null; },
+    // Password is exposed read-only; it is never persisted anywhere.
+    get sharePassword() { return sharePassword; },
+    set sharePassword(v) { sharePassword = typeof v === 'string' ? v : ''; },
+    get isSharePasswordProtected() { return isSharePasswordProtected(); },
     get isPaused() { return isPaused; },
     set isPaused(v) { isPaused = v; },
     get activeSlug() { return activeSlug; },
@@ -387,12 +450,18 @@ peer.on('connection', (conn) => {
                 conn.send({ type: 'NO_FILE_HOSTED' });
                 return;
             }
+            // Password-protected shares still reveal metadata (name/size),
+            // but START_DOWNLOAD is refused until the conn is verified.
             conn.send({
                 type: 'INFO',
                 name: selectedFile.name,
                 size: selectedFile.size,
-                fileType: selectedFile.type
+                fileType: selectedFile.type,
+                passwordProtected: isSharePasswordProtected() && !isConnVerified(conn.peer)
             });
+        } else if (data.type === 'VERIFY_PASSWORD') {
+            // Structured so a rate-limit/lockout can be added here later.
+            handleVerifyPassword(conn, data);
         } else if (data.type === 'START_DOWNLOAD') {
             if (isPaused) {
                 conn.send({ type: 'HOST_PAUSE' });
@@ -400,6 +469,17 @@ peer.on('connection', (conn) => {
             }
             if (!selectedFile) {
                 conn.send({ type: 'NO_FILE_HOSTED' });
+                return;
+            }
+            // Defensive: never trust the client — re-lock if not verified.
+            if (isSharePasswordProtected() && !isConnVerified(conn.peer)) {
+                conn.send({
+                    type: 'INFO',
+                    name: selectedFile.name,
+                    size: selectedFile.size,
+                    fileType: selectedFile.type,
+                    passwordProtected: true
+                });
                 return;
             }
             sendFile(conn, data.offset || 0);

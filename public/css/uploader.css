@@ -325,6 +325,18 @@ p {
     border-radius: 8px !important;
 }
 
+/* QR code canvas: generated with white modules on transparency (dark theme).
+   In light theme the filter inverts it to dark modules on transparency. */
+#qrCodeContainer canvas {
+    display: block;
+    margin: 0 auto;
+    border-radius: 8px;
+}
+
+body.light-theme #qrCodeContainer canvas {
+    filter: invert(1);
+}
+
 #link {
     font-size: 0.8rem;
     text-transform: none;

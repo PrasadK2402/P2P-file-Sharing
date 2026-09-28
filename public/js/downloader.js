@@ -6,6 +6,10 @@ const fileNameSpan = document.getElementById('fileName');
 const fileSizeSpan = document.getElementById('fileSize');
 const downloadBtn = document.getElementById('downloadBtn');
 const downloadControls = document.getElementById('downloadControls');
+const passwordPrompt = document.getElementById('passwordPrompt');
+const passwordInput = document.getElementById('passwordInput');
+const verifyPasswordBtn = document.getElementById('verifyPasswordBtn');
+const passwordError = document.getElementById('passwordError');
 const pausePlayBtn = document.getElementById('pausePlayBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const streamAnimation = document.getElementById('streamAnimation');
@@ -29,6 +33,24 @@ let lastProgressSentAt = 0;
 let lastProgressPercent = -1;
 let currentStatusColor = 'red';
 window.currentStatusColor = currentStatusColor;
+
+// FEATURE 2 (receiver): password gate state. Verification is per session AND
+// per file: it resets whenever the hosted file changes, on reconnect (new
+// DataConnection = sender must re-verify this conn anyway), and on cancel.
+let isVerifiedForCurrentFile = false;
+
+function resetPasswordVerification() {
+    isVerifiedForCurrentFile = false;
+}
+
+function showPasswordPromptUI(show) {
+    if (passwordPrompt) passwordPrompt.style.display = show ? 'block' : 'none';
+    if (!show && passwordError) passwordError.style.display = 'none';
+}
+
+function showPasswordError() {
+    if (passwordError) passwordError.style.display = 'block';
+}
 
 function clampPercent(value) {
     const percent = Number(value);
@@ -240,27 +262,85 @@ async function connectToUploader() {
             fileNameSpan.innerText = data.name;
             fileSizeSpan.innerText = (data.size / (1024 * 1024)).toFixed(2) + ' MB';
             fileInfo.style.display = 'block';
-            
+
+            // FEATURE 2: a password-protected share keeps the download locked
+            // until this session verifies. Any change of file (name/size) or a
+            // fresh lock flag re-locks, mirroring the fileChanged reset above.
+            if (fileChanged) {
+                resetPasswordVerification();
+            }
+            const isProtected = data.passwordProtected === true;
+            if (!isProtected) {
+                isVerifiedForCurrentFile = false; // unprotected share: no gate
+            }
+            const showPasswordPrompt = isProtected && !isVerifiedForCurrentFile;
+            showPasswordPromptUI(showPasswordPrompt);
+            if (showPasswordPrompt && passwordInput) {
+                // Let the user correct a previous attempt; only clear on re-lock.
+                if (fileChanged) {
+                    passwordInput.value = '';
+                    if (passwordError) passwordError.style.display = 'none';
+                }
+            }
+
             updateProgressBar();
             
             // Only reset UI controls if the file actually changed or if we are not actively downloading
             if (fileChanged || !isDownloading) {
-                downloadBtn.style.display = 'inline-flex';
-                downloadControls.style.display = 'none';
-                pausePlayBtn.innerText = 'Pause Download';
-                pausePlayBtn.classList.remove('paused');
-                isPaused = false;
-
-                if (receivedSize > 0) {
-                    downloadBtn.innerText = 'Resume Download';
-                    status.innerText = `Connected! Ready to resume download at ${(receivedSize / (1024 * 1024)).toFixed(2)} MB.`;
-                    setStatusDot('red');
+                if (showPasswordPrompt) {
+                    // Locked: hide the normal download flow until verified.
+                    downloadBtn.style.display = 'none';
+                    downloadControls.style.display = 'none';
+                    status.innerText = 'This share is password protected. Enter the password to unlock.';
+                    setStatusDot('yellow');
                 } else {
-                    downloadBtn.innerText = 'Download';
-                    status.innerText = 'Connected! Ready to download.';
-                    setStatusDot('red');
+                    downloadBtn.style.display = 'inline-flex';
+                    downloadControls.style.display = 'none';
+                    pausePlayBtn.innerText = 'Pause Download';
+                    pausePlayBtn.classList.remove('paused');
+                    isPaused = false;
+
+                    if (receivedSize > 0) {
+                        downloadBtn.innerText = 'Resume Download';
+                        status.innerText = `Connected! Ready to resume download at ${(receivedSize / (1024 * 1024)).toFixed(2)} MB.`;
+                        setStatusDot('red');
+                    } else {
+                        downloadBtn.innerText = 'Download';
+                        status.innerText = 'Connected! Ready to download.';
+                        setStatusDot('red');
+                    }
                 }
             }
+        } else if (data.type === 'PASSWORD_OK') {
+            // Unlocked: continue with the normal download flow.
+            isVerifiedForCurrentFile = true;
+            showPasswordPromptUI(false);
+            if (passwordInput) passwordInput.value = '';
+            if (isDownloading) {
+                status.innerText = 'Reconnected! Resuming download...';
+                setStatusDot('green');
+                if (streamAnimation) streamAnimation.style.display = 'flex';
+                startHeartbeat();
+                if (!isPaused && conn && conn.open) {
+                    conn.send({ type: 'START_DOWNLOAD', offset: receivedSize });
+                }
+            } else {
+                downloadBtn.style.display = 'inline-flex';
+                downloadControls.style.display = 'none';
+                if (receivedSize > 0) {
+                    downloadBtn.innerText = 'Resume Download';
+                    status.innerText = `Unlocked! Ready to resume download at ${(receivedSize / (1024 * 1024)).toFixed(2)} MB.`;
+                } else {
+                    downloadBtn.innerText = 'Download';
+                    status.innerText = 'Unlocked! Ready to download.';
+                }
+                setStatusDot('red');
+            }
+        } else if (data.type === 'PASSWORD_INVALID') {
+            // Inline error only — stay on the page and let the user retry.
+            showPasswordError();
+            status.innerText = 'Incorrect password. Try again.';
+            setStatusDot('red');
         } else if (data.type === 'CHUNK') {
             handleChunk(data);
         } else if (data.type === 'TRANSFER_CANCELLED') {
@@ -349,6 +429,11 @@ function handleDisconnect() {
 window.downloaderState = {
     get isDownloading() { return isDownloading; },
     set isDownloading(v) { isDownloading = v; },
+    get isVerifiedForCurrentFile() { return isVerifiedForCurrentFile; },
+    set isVerifiedForCurrentFile(v) { isVerifiedForCurrentFile = Boolean(v); },
+    resetPasswordVerification,
+    showPasswordError,
+    showPasswordPromptUI,
     get isPaused() { return isPaused; },
     set isPaused(v) { isPaused = v; },
     get isHostPaused() { return isHostPaused; },
